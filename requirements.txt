@@ -1,0 +1,8 @@
+streamlit==1.40.1
+pandas
+numpy
+requests
+feedparser
+pyyaml
+lunar-python
+colorama
