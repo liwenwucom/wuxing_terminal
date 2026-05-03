@@ -6,3 +6,6 @@ feedparser
 pyyaml
 lunar-python
 colorama
+zhipuai
+pyttsx3
+plyer

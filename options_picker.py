@@ -38,6 +38,64 @@ OPTION_STRATEGIES = {
 }
 
 
+# ============================================================
+# 专业期权策略池（水洲·期权核心策略）
+# ============================================================
+PRO_OPTION_STRATEGIES = [
+    {
+        "id": "O1",
+        "tool": "买入看跌期权 (Long Put)",
+        "scenario": "纯碱/铁矿石/鸡蛋/房地产产业链品种",
+        "purpose": "以有限权利金捕获市场潜在下跌，对反向波动风险不敏感",
+        "recommendation": "纯碱短期压力最大(玻璃开工+光伏库存)，推荐直接买入看跌期权",
+    },
+    {
+        "id": "O2",
+        "tool": "卖出虚值看涨期权 (Short OTM Call)",
+        "scenario": "碳酸锂/工业硅/螺纹钢",
+        "purpose": "赚取时间价值，构建备兑开仓增厚现货/多单收益",
+        "recommendation": "持有现货或标准仓单的产业客户可优先选择，增强持仓收益",
+    },
+    {
+        "id": "O3",
+        "tool": "牛市看涨价差 (Bull Call Spread)",
+        "scenario": "黄金AU/白银AG/生猪LH",
+        "purpose": "对上行方向有时间限制的上行判断，降低权利金成本",
+        "recommendation": "黄金/白银上行确定性高但短期有波动，价差优于直接买Call",
+    },
+    {
+        "id": "O4",
+        "tool": "熊市看跌价差 (Bear Put Spread)",
+        "scenario": "工业硅/碳酸锂",
+        "purpose": "结合偏空趋势判断同时规避持续暴跌尾部风险",
+        "recommendation": "供给压力持续释放但下方空间有限，价差结构更安全",
+    },
+    {
+        "id": "O5",
+        "tool": "买入跨式/宽跨式 (Long Straddle/Strangle)",
+        "scenario": "原油SC/地缘突发事件窗口",
+        "purpose": "事件驱动型策略，捕捉波动率放大带来的Gamma收益",
+        "recommendation": "美伊局势存在反复风险，事件窗口前可低位建仓跨式博波动率",
+    },
+    {
+        "id": "O6",
+        "tool": "卖出宽跨式 (Short Strangle)",
+        "scenario": "PTA/甲醇/震荡格局品种",
+        "purpose": "震荡市场赚取双方向的时间衰减收益",
+        "recommendation": "上述品种短期震荡格局清晰，Theta策略收益稳定",
+    },
+]
+
+STOP_LOSS_DISCIPLINE = {
+    "max_loss_per_trade": "单笔亏损不超过总资金的2%",
+    "futures_stop": "突破关键支撑/阻力位2%应止损",
+    "options_stop": "权利金亏损50%或Delta方向逆转时离场",
+    "position_sizing": "单一品种持仓不超过总资金15%，杠杆不超过3倍",
+    "drawdown_rule": "总资金回撤达20%时强制暂停所有新开仓",
+    "disclaimer": "必须根据自身风险承受能力动态调整，所有策略均需自行设置止损线",
+}
+
+
 def pick_options(boost_level: str, underlying_stocks: list, risk_level: str = "moderate") -> dict:
     """根据增强/削弱级别和标的股票推荐期权策略"""
 

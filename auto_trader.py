@@ -27,7 +27,21 @@ from five_elements import (
 from stock_picker import pick_stocks
 from futures_picker import pick_china_futures_categorized
 from backtest import calculate_win_rate, save_event_log
+from policy_analyzer import (get_policy_score, get_boost_level_from_policy,
+                            generate_policy_summary, generate_global_summary, get_global_impact,
+                            get_sensitive_bonus, get_long_track_bonus,
+                            summarize_fire_sensitive, summarize_earth_tracks,
+                            POLICY_REFERENCE_INDEX, APRIL_PERFORMANCE,
+                            get_rotation_bonus, summarize_monthly_rotation)
 from reporter import SCORE_WEIGHTS
+from pro_recommendations import get_consensus_bonus, get_pro_recommendation
+from options_picker import PRO_OPTION_STRATEGIES, STOP_LOSS_DISCIPLINE
+from bazi_capacity import (get_capacity_score_for_scoring, IPO_DATE_MAP,
+                           get_market_annual_assessment, get_chang_sheng,
+                           get_riyuan_from_ipo, get_trade_day_info,
+                           CHANG_SHENG_TABLE, STAGE_NAMES, CAPACITY_SCORES)
+from wuxing_timing import (get_timing_for_stock, get_timing_signal_bonus,
+                          summarize_timing, get_may_event_summary)
 
 
 REPORTS_DIR = Path(__file__).parent / "daily_reports"
@@ -110,11 +124,33 @@ def pick_30_stocks_china(news_list: list) -> dict:
 
     for stock in candidates:
         stock_wx = _classify_stock_wuxing(stock)
-        stock_direction = _calc_stock_direction(stock_wx, dominant_wx, boost_level, avg_news_sentiment)
+        stock_industry = stock.get("matched_industry", "")
+        stock_code = stock.get("code", "")
+        ipo_date = IPO_DATE_MAP.get(stock_code, "1990-01-01")
+        riyuan = get_riyuan_from_ipo(ipo_date)
+        trade_info = get_trade_day_info(datetime.now().strftime("%Y-%m-%d"))
+        chang_sheng = get_chang_sheng(riyuan["gan"], trade_info["day_zhi"])
+        capacity_score = chang_sheng["capacity_score"]
+        stock_direction = _calc_stock_direction(stock_wx, dominant_wx, boost_level,
+                                                avg_news_sentiment, stock_industry,
+                                                stock_code)
         stock["wuxing"] = stock_wx
         stock["direction_score"] = stock_direction["score"]
         stock["direction_label"] = stock_direction["label"]
         stock["direction_reason"] = stock_direction["reason"]
+        stock["ipo_date"] = ipo_date
+        stock["riyuan_gan"] = riyuan["gan"]
+        stock["riyuan_zhi"] = riyuan["zhi"]
+        stock["chang_sheng_stage"] = chang_sheng["stage_index"]
+        stock["chang_sheng_name"] = chang_sheng["stage_name"]
+        stock["capacity_score"] = capacity_score
+
+        timing = get_timing_for_stock(stock_code, stock.get("name", ""))
+        stock["timing_signal"] = timing["signal"]
+        stock["star_display"] = timing["star_display"]
+        stock["stars"] = timing["stars"]
+        stock["expected_range"] = timing["expected_range"]
+        stock["option_hint"] = timing["option_hint"]
 
     # 按分数排序
     candidates.sort(key=lambda x: x["direction_score"], reverse=True)
@@ -186,41 +222,54 @@ def _classify_stock_wuxing(stock: dict) -> str:
     return "未匹配"
 
 
-def _calc_stock_direction(stock_wx: str, dominant_wx: str, boost_level: str, avg_sentiment: float) -> dict:
-    """综合五行生克+气场+情绪 计算单只股票的多空方向"""
+def _calc_stock_direction(stock_wx: str, dominant_wx: str, boost_level: str,
+                         avg_sentiment: float, stock_industry: str = "",
+                         stock_code: str = "") -> dict:
+    """综合五行生克+气场+情绪+政策+机构共识 计算单只股票的多空方向"""
 
-    # 五行生克分数
+    wx_score = 0.0
     if stock_wx == dominant_wx:
-        wx_score = 0.3 if boost_level in ("增强", "当令") else 0.1
+        wx_score = 0.3 if boost_level in ("增强", "当令", "旺相") else 0.1
     elif dominant_wx in WUXING_SHENG and WUXING_SHENG[dominant_wx] == stock_wx:
         wx_score = 0.2
     elif dominant_wx in WUXING_KE and WUXING_KE[dominant_wx] == stock_wx:
         wx_score = -0.3
-    else:
-        wx_score = 0.0
 
-    # 气场修正
-    boost_dict = {"增强": 0.4, "当令": 0.3, "中性": 0.0, "轻微削弱": -0.2, "削弱": -0.4}
+    boost_dict = {"增强": 0.4, "当令": 0.3, "旺相": 0.35, "中性": 0.0, "平和": 0.0, "轻微削弱": -0.2, "削弱": -0.4}
     boost_bonus = boost_dict.get(boost_level, 0)
 
-    # 综合分 = 生克×0.4 + 气场×0.3 + 情绪×0.3
-    total = wx_score * 0.4 + boost_bonus * 0.3 + avg_sentiment * 0.3
+    policy_score, matched_policies = get_policy_score(stock_industry, stock_wx, dominant_wx)
 
-    if total > 0.4:
+    consensus_bonus = get_consensus_bonus(stock_code)
+    sensitive_bonus = get_sensitive_bonus(stock_code)
+    long_track_bonus = get_long_track_bonus(stock_code)
+    capacity_score = get_capacity_score_for_scoring(stock_code, IPO_DATE_MAP)
+    rotation_bonus = get_rotation_bonus(stock_code)
+    timing_bonus = get_timing_signal_bonus(
+        get_timing_for_stock(stock_code).get("signal", "等")
+    )
+
+    total = (wx_score * 0.14 + boost_bonus * 0.12 + avg_sentiment * 0.10
+             + policy_score * 0.14 + consensus_bonus * 0.09
+             + sensitive_bonus * 0.04 + long_track_bonus * 0.03
+             + capacity_score * 0.15 + rotation_bonus * 0.08
+             + timing_bonus * 0.11)
+
+    if total > 0.35:
         label = "买入"
-        reason = "五行共振+气场支持，多头信号明确"
-    elif total > 0.15:
+        reason = "五星共振+政策加持+机构共识，多头信号明确"
+    elif total > 0.12:
         label = "买入"
-        reason = "五行有利，震荡偏多"
-    elif total < -0.3:
+        reason = "综合评分偏多，政策面有支撑"
+    elif total < -0.25:
         label = "卖出"
-        reason = "五行受克+气场压制，空头信号明确"
-    elif total < -0.05:
+        reason = "五行受克+政策不利，空头信号明确"
+    elif total < -0.04:
         label = "卖出"
-        reason = "五行不利，震荡偏空"
+        reason = "综合评分偏空，缺乏政策支撑"
     else:
         label = "回避"
-        reason = "五行气场中性，方向不明朗"
+        reason = "多空交织，方向不明朗"
 
     return {"score": round(total, 3), "label": label, "reason": reason}
 
@@ -251,6 +300,13 @@ def generate_daily_report() -> dict:
         "term": term,
         "dominant_wuxing": stock_report["dominant_wuxing"],
         "boost_level": stock_report["boost_level"],
+        "policy_boost_level": get_boost_level_from_policy(stock_report["dominant_wuxing"]),
+        "policy_summary": generate_policy_summary(),
+        "global_summary": generate_global_summary(),
+        "global_impact": get_global_impact(),
+        "fire_sensitive_summary": summarize_fire_sensitive(),
+        "earth_tracks_summary": summarize_earth_tracks(),
+        "monthly_rotation_summary": summarize_monthly_rotation(),
         "boost_detail": stock_report["boost_detail"],
         "ganzhi": stock_report.get("ganzhi", {}).get("day_ganzhi", ""),
         "score_weights": SCORE_WEIGHTS,
@@ -263,11 +319,19 @@ def generate_daily_report() -> dict:
         "avoid_futures": futures_report["avoid_futures"],
         "futures_count": futures_report["total_count"],
         "options_summary": futures_report.get("options_summary", {}),
+        "pro_option_strategies": PRO_OPTION_STRATEGIES,
+        "stop_loss_discipline": STOP_LOSS_DISCIPLINE,
         "win_rate": stock_report["win_rate"],
         "sandiao": sandiao,
         "risk_warning": RISK_WARNING,
-        "disclaimer": "玄学有风险，梭哈需谨慎。本报告仅供娱乐，不构成任何投资建议。",
+        "annual_assessment": get_market_annual_assessment(),
+        "may_events": get_may_event_summary(),
+        "policy_reference_index": POLICY_REFERENCE_INDEX,
+        "april_performance": APRIL_PERFORMANCE,
+        "disclaimer": "本报告仅为基于宏观政策与公开信息的逻辑推演和整理呈现，不构成任何形式的投资建议、买卖指令或证券推荐。市场风险莫测，投资须怀敬畏之心。",
     }
+
+    report["timing_summary"] = summarize_timing(report)
 
     with _DAILY_STATE["lock"]:
         _DAILY_STATE["today_report"] = report
