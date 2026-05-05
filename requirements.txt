@@ -1,4 +1,4 @@
-streamlit==1.40.1
+streamlit>=1.40
 pandas
 numpy
 requests
@@ -9,3 +9,4 @@ colorama
 zhipuai
 pyttsx3
 plyer
+akshare>=1.17
